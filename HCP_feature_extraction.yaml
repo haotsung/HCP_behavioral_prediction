@@ -1,0 +1,45 @@
+workdir: /tmp
+
+with:
+  - ../external/juni-farm/juni_farm/datagrabber/hcp_ya_confounds_cat.py
+
+datagrabber:
+    kind: MultipleHCP
+    ica_fix: true
+    tasks:
+      - REST1
+      - REST2
+
+preprocess:
+    kind: fMRIPrepConfoundRemover
+    detrend: true
+    standardize: true
+    strategy:
+        wm_csf: full
+        global_signal: full
+    low_pass: 0.08
+    high_pass: 0.01
+    masks:
+      - fetch_icbm152_brain_gm_mask
+
+markers:
+  
+  - name: Schaefer400x17
+    kind: FunctionalConnectivityParcels
+    parcellation: str
+    masks: 
+      - inherit
+
+storage:
+  kind: HDF5FeatureStorage
+  uri: /home/haotsung/HCP_feature_extraction/yaml_file
+
+queue:
+  jobname: HCP_icbm152_mask_10mmreho
+  kind: HTCondor
+  env:
+    kind: conda
+    name: afni
+  mem: 20G
+  disk: 5G
+  verbose: info
