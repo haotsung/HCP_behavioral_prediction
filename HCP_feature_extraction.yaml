@@ -20,19 +20,21 @@ preprocess:
     low_pass: 0.08
     high_pass: 0.01
     masks:
-      - fetch_icbm152_brain_gm_mask
+      - compute_brain_mask:
+          threshold: 0.2
+          mask_type: brain
 
 markers:
   
   - name: Schaefer400x17
     kind: FunctionalConnectivityParcels
-    parcellation: str
+    parcellation: Schaefer400x17
     masks: 
       - inherit
 
 storage:
   kind: HDF5FeatureStorage
-  uri: /home/haotsung/HCP_feature_extraction/yaml_file
+  uri: /home/haotsung/HCP_feature_extraction/output/features.hdf5
 
 queue:
   jobname: HCP_icbm152_mask_10mmreho
