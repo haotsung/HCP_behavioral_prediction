@@ -3,15 +3,16 @@ import numpy as np
 from statsmodels.multivariate.pca import PCA
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
-import seaborn as sns
-from sklearn.linear_model import LinearRegression
-from scipy.stats import pearsonr
-from sklearn.metrics import r2_score, make_scorer
 from argparse import ArgumentParser
 from factor_analyzer import Rotator
 from junifer.storage import HDF5FeatureStorage
 from sklearn.kernel_ridge import KernelRidge
-from sklearn.model_selection import GridSearchCV, KFold, cross_val_score
+from julearn import run_cross_validation
+from julearn.pipeline import PipelineCreator
+from julearn.utils import configure_logging
+from pprint import pprint
+from sklearn.model_selection import RepeatedKFold
+configure_logging(level="DEBUG")
 
 # %%
 parser = ArgumentParser()
@@ -86,59 +87,40 @@ merged_df.drop('Subject', axis=1, inplace=True)
 # %%
 # Regression model training
 # Step 1: Seperate features (X) and targets (y)
-
-X = merged_df.iloc[:,1:79801]
-y = merged_df[f"{pca_component}"]
-
-# Define a parameter grid for hyperparameter tuning
-param_grid = {
-    'alpha': [0.001, 0.01, 0.1, 1, 10],  # Regularization parameter
-    'kernel': ['linear', 'rbf'],  # Kernel type
-    'gamma': np.logspace(-2, 2, 5)  # Gamma for RBF kernel
-}
-krr = KernelRidge()
-
-n_repetitions = 60
-n_splits = 10
-
-# Function to calculate Pearson correlation
-def r_corr_scorer(y_true, y_pred):
-    print(y_pred)
-    r_corr, _ = pearsonr(y_true, y_pred)
-    return r_corr
-
-# Create custom scorers
-r2_scorer = make_scorer(r2_score)
-r_corr_scorer = make_scorer(r_corr_scorer)
-
-# For storing results
-all_folds = []
-all_r_corr = []
-all_r_squared = []
-
-for replication in range(n_repetitions):
-    print(f"In replication:{replication}")
-    outer_cv = KFold(n_splits=n_splits, shuffle=True, random_state=replication)
-    inner_cv = KFold(n_splits=n_splits, shuffle=True, random_state=replication)
-
-    grid_search = GridSearchCV(estimator=krr, param_grid=param_grid, cv=inner_cv, scoring=r2_scorer)
-
-    # Nested cross-validation for R2
-    scores_r2 = cross_val_score(grid_search, X, y, cv=outer_cv, scoring=r2_scorer)
-    
-    # Nested cross-validation for r_corr
-    scores_r_corr = cross_val_score(grid_search, X, y, cv=outer_cv, scoring=r_corr_scorer)
-
-    for fold in range(n_splits):
-        all_folds.append(fold + 1)  # Folds go from 1 to 10
-        all_r_corr.append(scores_r_corr[fold])
-        all_r_squared.append(scores_r2[fold])
+X = merged_df.columns[1:79801].tolist()
+y = f"{pca_component}"
+X_types = {
+    "features":[".*~.*"],
+} 
+# %%
+# Create the pipeline that will be used to predict the target.
+kernel_ridge_model = KernelRidge()
+creator = PipelineCreator(problem_type="regression")
+creator.add("zscore", apply_to="*")
+creator.add(kernel_ridge_model, alpha=[0.001,0.01,0.1,1.0,10], kernel='rbf', gamma=[0.001,0.01,0.1,1.0,10],apply_to="features")
+#creator.add("linreg",apply_to="feature")
+# Evaluate the model within the cross validation.
+rkf = RepeatedKFold(n_splits=10,n_repeats=5,random_state=42)
+scores_tuned, model_tuned = run_cross_validation(
+    X=X,
+    y=y,
+    X_types=X_types,
+    data=merged_df,
+    model=creator, 
+    return_estimator="all",
+    cv=rkf,
+    scoring= ['r2_corr','r_corr']
+)
+print("r2_corr:\n",scores_tuned["test_r2_corr"])
+print("r_corr:\n",scores_tuned["test_r_corr"])
+print(f"Scores with best hyperparameter: {scores_tuned['test_r_corr'].mean()}")
+pprint(model_tuned.best_params_) 
 
 result_df = pd.DataFrame(
     {
-        "Folds" : all_folds,
-        "r_corr": all_r_corr,
-        "r2": all_r_squared
+        #"Folds" : [i for i in range(10)],
+        "r_corr": scores_tuned["test_r_corr"],
+        "r2": scores_tuned["test_r2_corr"],
     }
 )
 result_df.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/replicate/scores_ridge_{pca_component}.csv")
