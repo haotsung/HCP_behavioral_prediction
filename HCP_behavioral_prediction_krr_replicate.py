@@ -12,7 +12,16 @@ from julearn.pipeline import PipelineCreator
 from julearn.utils import configure_logging
 from pprint import pprint
 from sklearn.model_selection import RepeatedKFold
+from julearn.config import set_config
+
+try:
+    configure_logging(level="DEBUG")
+except Exception as e:
+    print(e)
 configure_logging(level="DEBUG")
+
+set_config("disable_x_check", True)
+set_config("disable_xtypes_check", True)
 
 # %%
 parser = ArgumentParser()
@@ -23,12 +32,12 @@ pca_component = args.pca_component
 # 80 specific subjects same as the paper
 train_subs = pd.read_csv(
     "MMP_HCP_80_subs_componentscoreestimation.txt", header=None
-).values.flatten()  # 80 subjects
+).values.flatten().astype(str)  # 80 subjects
 
 # 753 specific subject for main analysis same as the paper
 test_subs = pd.read_csv(
     "MMP_HCP_753_subs.txt", header=None
-).values.flatten()  # 753 subjects
+).values.flatten().astype(str)  # 753 subjects
 
 columns= ['PicSeq_Unadj','CardSort_Unadj','Flanker_Unadj','PMAT24_A_CR','ReadEng_Unadj','PicVocab_Unadj','ProcSpeed_Unadj','VSPLOT_TC','SCPT_SEN','SCPT_SPEC','IWRD_TOT','ListSort_Unadj','MMSE_Score',
                      'PSQI_Score','Endurance_Unadj','Dexterity_Unadj','Strength_Unadj','Odor_Unadj','PainInterf_Tscore','Taste_Unadj','Mars_Final','Emotion_Task_Face_Acc','Language_Task_Math_Avg_Difficulty_Level',
@@ -37,9 +46,10 @@ columns= ['PicSeq_Unadj','CardSort_Unadj','Flanker_Unadj','PMAT24_A_CR','ReadEng
                      'Loneliness_Unadj','PercHostil_Unadj','PercReject_Unadj','EmotSupp_Unadj','InstruSupp_Unadj','PercStress_Unadj','SelfEff_Unadj','DDisc_AUC_40K','GaitSpeed_Comp']
 # Load the dataset
 full_df = pd.read_csv("Behavioral_Data", index_col="Subject")[columns]
-
+full_df.index = full_df.index.astype(str)
 test_df = full_df.loc[test_subs]
 train_df = full_df.loc[train_subs]
+
 # %% Z-score and PCA
 def compute_factors(df_train, df_test):
     scaler = StandardScaler()
@@ -64,30 +74,25 @@ factors_correct = compute_factors(train_df, test_df)
 # %% Feature generation
 storage = HDF5FeatureStorage("features.hdf5")
 df_features = storage.read_df('BOLD_Schaefer400x17_functional_connectivity')
-df_features_reset = df_features.reset_index() # Reset the index to convert MultiIndex to columns
 
 # Ignore ROI1==ROI2
-columns_with_tilde = [col for col in df_features_reset.columns if '~' in col]
-columns_to_keep = ['phase_encoding'] + ['subject'] + [col for col in columns_with_tilde if col.split('~')[0] != col.split('~')[1]]
-df_filtered_features = df_features_reset[columns_to_keep]
+# columns_with_tilde = [col for col in df_features.columns if '~' in col]
+# columns_to_keep = ['phase_encoding'] + ['subject'] + [col for col in columns_with_tilde if col.split('~')[0] != col.split('~')[1]]
+# df_filtered_features = df_features[columns_to_keep]
 
-# Select only numeric columns for the mean calculation
-numeric_columns = df_filtered_features.select_dtypes(include='number').columns
 
-# Group by 'subject' and calculate the mean for numeric columns across REST1/LR, REST1/RL, REST2/LR, REST2/RL 
-averaged_features = df_filtered_features.groupby('subject', as_index=False)[numeric_columns].mean()
-
-# Convert 'subject' column to int in averaged_features
-averaged_features['subject'] = averaged_features['subject'].astype(int)
+# Group by 'subject' and calculate the mean across REST1/LR, REST1/RL, REST2/LR, REST2/RL 
+df_features = df_features.groupby('subject').mean()
 
 # merge the dataframe
-factors_correct.reset_index(inplace=True)
-merged_df = pd.merge(averaged_features,factors_correct,left_on='subject',right_on='Subject')
-merged_df.drop('Subject', axis=1, inplace=True)
+df_features.index.name= "Subject"
+df_data = df_features.join(factors_correct, how="inner")
+
 # %%
 # Regression model training
 # Step 1: Seperate features (X) and targets (y)
-X = merged_df.columns[1:79801].tolist()
+X = [x for x in df_data.columns if "~" in x]
+X = [x for x in X if x.split("~")[0] != x.split("~")[1]]
 y = f"{pca_component}"
 X_types = {
     "features":[".*~.*"],
@@ -95,32 +100,54 @@ X_types = {
 # %%
 # Create the pipeline that will be used to predict the target.
 kernel_ridge_model = KernelRidge()
-creator = PipelineCreator(problem_type="regression")
-creator.add("zscore", apply_to="*")
-creator.add(kernel_ridge_model, alpha=[0.001,0.01,0.1,1.0,10], kernel='rbf', gamma=[0.001,0.01,0.1,1.0,10],apply_to="features")
-#creator.add("linreg",apply_to="feature")
+creator = PipelineCreator(problem_type="regression",apply_to="features")
+creator.add("zscore")
+creator.add(
+    kernel_ridge_model, 
+    alpha=[        
+        0,
+        0.00001,
+        0.0001,
+        0.001,
+        0.004,
+        0.007,
+        0.01,
+        0.04,
+        0.07,
+        0.1,
+        0.4,
+        0.7,
+        1,
+        1.5,
+        2,
+        2.5,
+        3,
+        3.5,
+        4,
+        5,
+        10,
+        15,
+        20,], 
+    kernel='linear', 
+    )
+# %%
 # Evaluate the model within the cross validation.
 rkf = RepeatedKFold(n_splits=10,n_repeats=5,random_state=42)
 scores_tuned, model_tuned = run_cross_validation(
     X=X,
     y=y,
     X_types=X_types,
-    data=merged_df,
+    data=df_data,
     model=creator, 
     return_estimator="all",
     cv=rkf,
-    scoring= ['r2_corr','r_corr']
+    scoring= ['r2_corr','r_corr'],
+    n_jobs = -1,
 )
 print("r2_corr:\n",scores_tuned["test_r2_corr"])
 print("r_corr:\n",scores_tuned["test_r_corr"])
 print(f"Scores with best hyperparameter: {scores_tuned['test_r_corr'].mean()}")
 pprint(model_tuned.best_params_) 
 
-result_df = pd.DataFrame(
-    {
-        #"Folds" : [i for i in range(10)],
-        "r_corr": scores_tuned["test_r_corr"],
-        "r2": scores_tuned["test_r2_corr"],
-    }
-)
-result_df.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/replicate/scores_ridge_{pca_component}.csv")
+# %%
+scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/replicate/scores_ridge_{pca_component}.csv")
