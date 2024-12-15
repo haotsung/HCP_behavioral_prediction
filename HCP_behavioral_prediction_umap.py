@@ -12,7 +12,6 @@ from julearn.utils import configure_logging
 configure_logging(level="INFO")
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from sklearn.decomposition import SparsePCA
 
 from julearn.config import set_config
 set_config("disable_x_check", True)
@@ -34,7 +33,6 @@ columns = [x for x in df_features.columns if "~" in x]
 columns = [x for x in columns if x.split("~")[0] != x.split("~")[1]]
 df_features = df_features[columns]
 
-df_features = df_features.iloc[:,0:1000]
 # merge the dataframe
 df_behavioral = pd.read_csv("Behavioral_Data",index_col="Subject")
 df_behavioral.index = df_behavioral.index.astype(str)
@@ -47,7 +45,6 @@ df_behavioral = df_behavioral[behavioral_columns]
 df_features.index.name = "Subject"
 df_data = df_features.join(df_behavioral,how="inner")
 
-df_data = df_data.iloc[0:300,:]
 # %%
 X = df_data.columns.tolist()
 y = "__generated__"
@@ -115,7 +112,7 @@ creator.add(
 
 # %%
 # Evaluate the model within the cross validation.
-rkf = RepeatedKFold(n_splits=3,n_repeats=1,random_state=42)
+rkf = RepeatedKFold(n_splits=10,n_repeats=5,random_state=42)
 scores_tuned, model_tuned = run_cross_validation(
     X=X,
     y=y,
