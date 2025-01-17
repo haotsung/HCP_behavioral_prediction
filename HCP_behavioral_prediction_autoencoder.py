@@ -62,22 +62,22 @@ class Autoencoder(nn.Module):
     def __init__(self, input_dim, encoding_dim):
         super(Autoencoder, self).__init__()
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 1024),
+            nn.Linear(input_dim, 32),
             nn.ReLU(),
-            nn.Linear(1024,256),
+            nn.Linear(32,16),
             nn.ReLU(),
-            nn.Linear(256,64),
+            nn.Linear(16,8),
             nn.ReLU(),
-            nn.Linear(64, encoding_dim)
+            nn.Linear(8, encoding_dim)
         )
         self.decoder = nn.Sequential(
-            nn.Linear(encoding_dim, 64),
+            nn.Linear(encoding_dim, 8),
             nn.ReLU(),
-            nn.Linear(64,256),
+            nn.Linear(8, 16),
             nn.ReLU(),
-            nn.Linear(256,1024),
+            nn.Linear(16, 32),
             nn.ReLU(),
-            nn.Linear(1024, input_dim)
+            nn.Linear(32, input_dim)
         )
 
     def forward(self, x):
@@ -175,7 +175,8 @@ creator.add(
         100,
         200,
         500,
-        1000], 
+        1000,
+        ], 
     kernel='linear', 
     apply_to= "features"
     )
