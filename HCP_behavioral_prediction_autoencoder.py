@@ -28,15 +28,15 @@ parser.add_argument("--component", type=str, required=True, help="component to b
 args = parser.parse_args()
 component = args.component
 # %%
-# 80 specific subjects same as the paper
-train_subs = pd.read_csv(
-    "MMP_HCP_80_subs_componentscoreestimation.txt", header=None
-).values.flatten().astype(str)  # 80 subjects
+# # 80 specific subjects same as the paper
+# train_subs = pd.read_csv(
+#     "MMP_HCP_80_subs_componentscoreestimation.txt", header=None
+# ).values.flatten().astype(str)  # 80 subjects
 
-# 753 specific subject for main analysis same as the paper
-test_subs = pd.read_csv(
-    "MMP_HCP_753_subs.txt", header=None
-).values.flatten().astype(str)  # 753 subjects
+# # 753 specific subject for main analysis same as the paper
+# test_subs = pd.read_csv(
+#     "MMP_HCP_753_subs.txt", header=None
+# ).values.flatten().astype(str)  # 753 subjects
 
 columns= ['PicSeq_Unadj','CardSort_Unadj','Flanker_Unadj','PMAT24_A_CR','ReadEng_Unadj','PicVocab_Unadj','ProcSpeed_Unadj','VSPLOT_TC','SCPT_SEN','SCPT_SPEC','IWRD_TOT','ListSort_Unadj','MMSE_Score',
                      'PSQI_Score','Endurance_Unadj','Dexterity_Unadj','Strength_Unadj','Odor_Unadj','PainInterf_Tscore','Taste_Unadj','Mars_Final','Emotion_Task_Face_Acc','Language_Task_Math_Avg_Difficulty_Level',
@@ -46,15 +46,17 @@ columns= ['PicSeq_Unadj','CardSort_Unadj','Flanker_Unadj','PMAT24_A_CR','ReadEng
 # Load the dataset
 full_df = pd.read_csv("Behavioral_Data", index_col="Subject")[columns]
 full_df.index = full_df.index.astype(str)
-test_df = full_df.loc[test_subs]
-train_df = full_df.loc[train_subs]
+#test_df = full_df.loc[test_subs]
+#train_df = full_df.loc[train_subs]
 
 scaler = StandardScaler()
 imputer = IterativeImputer(max_iter=20, random_state=0)
-train_df_imputed = imputer.fit_transform(train_df)
-train_df_scaled = scaler.fit_transform(train_df_imputed)
-test_df_imputed = imputer.transform(test_df)
-test_df_scaled = scaler.transform(test_df_imputed)
+df_imputed = imputer.fit_transform(full_df)
+df_scaled = scaler.fit_transform(df_imputed)
+# train_df_imputed = imputer.fit_transform(train_df)
+# train_df_scaled = scaler.fit_transform(train_df_imputed)
+# test_df_imputed = imputer.transform(test_df)
+# test_df_scaled = scaler.transform(test_df_imputed)
 
 # %%
 # Define Autoencoder
@@ -95,9 +97,9 @@ criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
 
 # Training
-epochs = 50
+epochs = 500
 batch_size = 16
-X_train_tensor = torch.tensor(train_df_scaled, dtype=torch.float32)
+X_train_tensor = torch.tensor(df_scaled, dtype=torch.float32)
 
 for epoch in range(epochs):
     model.train()
@@ -111,12 +113,12 @@ for epoch in range(epochs):
 # Encode the behavioral data to lower dimensions
 with torch.no_grad():
     X_train_reduced = model.encoder(X_train_tensor).numpy()
-    X_test_tensor = torch.tensor(test_df_scaled, dtype=torch.float32)
+    X_test_tensor = torch.tensor(df_scaled, dtype=torch.float32)
     X_test_reduced = model.encoder(X_test_tensor).numpy()
 
 test_df_reduced = pd.DataFrame(
         X_test_reduced,
-        index=test_df.index,
+        index = full_df.index,
         columns=["component_1", "component_2", "component_3"],
     )
 
