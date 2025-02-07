@@ -17,6 +17,8 @@ from sklearn.model_selection import RepeatedKFold
 from julearn.config import set_config
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
+from torch.utils.data import DataLoader, TensorDataset
+
 
 configure_logging(level="INFO")
 set_config("disable_x_check", True)
@@ -97,18 +99,24 @@ criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=0.01)
 
 # Training
-epochs = 500
-batch_size = 16
+epochs = 100
+batch_size = 10
 X_train_tensor = torch.tensor(df_scaled, dtype=torch.float32)
+train_loader = DataLoader(TensorDataset(X_train_tensor), batch_size=batch_size, shuffle=True)
 
 for epoch in range(epochs):
     model.train()
-    optimizer.zero_grad()
-    _, reconstructed = model(X_train_tensor)
-    loss = criterion(reconstructed, X_train_tensor)
-    loss.backward()
-    optimizer.step()
-    #print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+    epoch_loss = 0 
+
+    for batch in train_loader:
+        batch_data = batch[0]
+        optimizer.zero_grad()
+        _, reconstructed = model(batch_data)
+        loss = criterion(reconstructed, batch_data)
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
 
 # Encode the behavioral data to lower dimensions
 with torch.no_grad():
@@ -175,11 +183,8 @@ creator.add(
         20,
         50,
         100,
-        200,
-        500,
-        1000,
         ], 
-    kernel='linear', 
+    kernel='linear',
     apply_to= "features"
     )
 # %%
@@ -203,4 +208,4 @@ pprint(model_tuned.best_params_)
 
 
 # %%
-scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/scores_krr_autoencoder_{component}.csv")
+scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/scores_krr_autoencoder_{component}_0206.csv")
