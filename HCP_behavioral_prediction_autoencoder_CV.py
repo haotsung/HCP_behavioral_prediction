@@ -20,6 +20,7 @@ from sklearn.impute import IterativeImputer
 from torch.utils.data import DataLoader, TensorDataset
 
 from sklearn.base import BaseEstimator, TransformerMixin
+from julearn import transformers
 configure_logging(level="INFO")
 set_config("disable_x_check", True)
 set_config("disable_xtypes_check", True)
@@ -28,7 +29,7 @@ set_config("disable_xtypes_check", True)
 # %%
 # Define Autoencoder
 class AutoencoderTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, input_dim, encoding_dim=3, epochs=100, batch_size=10, learning_rate=0.01, weight_decay=1e-4):
+    def __init__(self, input_dim, encoding_dim,epochs=100, batch_size=10, learning_rate=0.01, weight_decay=1e-4):
         self.input_dim = input_dim
         self.encoding_dim = encoding_dim
         self.epochs = epochs
@@ -36,31 +37,26 @@ class AutoencoderTransformer(BaseEstimator, TransformerMixin):
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.model = None
+        self.feature_names_out_ = [f"component_{i+1}" for i in range(self.encoding_dim)] # Define column names
 
     class Autoencoder(nn.Module):
         def __init__(self, input_dim, encoding_dim):
             super().__init__()
             self.encoder = nn.Sequential(
                 nn.Linear(input_dim, 32),
-                nn.BatchNorm1d(32),
                 nn.ReLU(),
                 nn.Linear(32,16),
-                nn.BatchNorm1d(16),
                 nn.ReLU(),
                 nn.Linear(16,8),
-                nn.BatchNorm1d(8),
                 nn.ReLU(),
                 nn.Linear(8, encoding_dim)
             )
             self.decoder = nn.Sequential(
                 nn.Linear(encoding_dim, 8),
-                nn.BatchNorm1d(8),
                 nn.ReLU(),
                 nn.Linear(8, 16),
-                nn.BatchNorm1d(16),
                 nn.ReLU(),
                 nn.Linear(16, 32),
-                nn.BatchNorm1d(32),
                 nn.ReLU(),
                 nn.Linear(32, input_dim)
             )
@@ -94,7 +90,7 @@ class AutoencoderTransformer(BaseEstimator, TransformerMixin):
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
-            print(f"Epoch {epoch+1}/{self.epochs}, Loss: {loss.item():.4f}")
+            #print(f"Epoch {epoch+1}/{self.epochs}, Loss: {loss.item():.4f}")
         
         return self
     def transform(self, X):
@@ -104,14 +100,18 @@ class AutoencoderTransformer(BaseEstimator, TransformerMixin):
         with torch.no_grad():
             X_tensor = torch.tensor(X.to_numpy(), dtype=torch.float32)
             encoded = self.model.encoder(X_tensor).numpy()
-        df_encoded = pd.DataFrame(encoded, index=X.index, columns=[str(f"component_{i+1}") for i in range(self.encoding_dim)])
-
-        df_encoded = df_encoded.astype(np.float32)   # Ensure correct data type
-        print("DEBUG: Transformed DataFrame:")
-        print(df_encoded.info())
+        df_encoded = pd.DataFrame(
+            encoded,
+            index = X.index,
+            columns = self.feature_names_out_
+        )
 
         return df_encoded
 
+    def get_feature_names_out(self, input_features=None):
+        return self.feature_names_out_
+    
+transformers.register_transformer("autoencoder", AutoencoderTransformer)
 # %%
 parser = ArgumentParser()
 parser.add_argument("--component", type=str, required=True, help="component to be selected")
@@ -126,7 +126,6 @@ df_features = df_features.groupby("subject").mean()
 columns = [x for x in df_features.columns if "~" in x]
 columns = [x for x in columns if x.split("~")[0] != x.split("~")[1]]
 df_features = df_features[columns]
-df_features = df_features.iloc[:,0:500] ### truncate some features
 
 # merge the dataframe
 df_behavioral = pd.read_csv("Behavioral_Data",index_col="Subject")
@@ -139,10 +138,6 @@ behavioral_columns = ['PicSeq_Unadj','CardSort_Unadj','Flanker_Unadj','PMAT24_A_
 df_behavioral = df_behavioral[behavioral_columns]
 df_features.index.name = "Subject"
 df_data = df_features.join(df_behavioral,how="inner")
-
-print("DEBUG: Julearn Feature Data Before Cross-Validation")
-print(df_data.info())
-print(df_data.head())
 
 # %%
 X = df_data.columns.tolist()
@@ -160,13 +155,13 @@ X_types = {
 
 
 # %%
-autoencoder_transformer = AutoencoderTransformer(input_dim=len(behavioral_columns), encoding_dim=3)
+#autoencoder_transformer = AutoencoderTransformer(input_dim=len(behavioral_columns), encoding_dim=3)
 
 target_creator = PipelineCreator(problem_type="transformer", apply_to="behavioral")
 imputer = IterativeImputer(max_iter=20, random_state=0)
 target_creator.add(imputer)
 target_creator.add("zscore")
-target_creator.add(autoencoder_transformer)
+target_creator.add("autoencoder",input_dim=len(behavioral_columns), encoding_dim=3,epochs=100, batch_size=10, learning_rate=0.01, weight_decay=1e-4)
 # Select a pca component
 target_creator.add("pick_columns", keep=component)
 
@@ -180,6 +175,7 @@ creator.add("generate_target", apply_to="behavioral", transformer=target_creator
 creator.add(
     kernel_ridge_model, 
     alpha=[        
+        1e-4,
         1e-3,
         1e-2,
         1e-1,
@@ -201,7 +197,7 @@ creator.add(
 
 # %%
 # Evaluate the model within the cross validation.
-rkf = RepeatedKFold(n_splits=3,n_repeats=1,random_state=42)
+rkf = RepeatedKFold(n_splits=3,n_repeats=10,random_state=42)
 scores_tuned, model_tuned = run_cross_validation(
     X=X,
     y=y,
@@ -219,4 +215,4 @@ print(f"Scores with best hyperparameter: {scores_tuned['test_r_corr'].mean()}")
 pprint(model_tuned.best_params_)
 
 # %%
-scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/scores_krr_{component}_autoencoder_CV.csv")
+scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/scores_krr_autoencoder_{component}_CV.csv")
