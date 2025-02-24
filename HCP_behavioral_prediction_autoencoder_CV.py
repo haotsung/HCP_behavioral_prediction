@@ -29,7 +29,7 @@ set_config("disable_xtypes_check", True)
 # %%
 # Define Autoencoder
 class AutoencoderTransformer(BaseEstimator, TransformerMixin):
-    def __init__(self, input_dim, encoding_dim,epochs=100, batch_size=10, learning_rate=0.01, weight_decay=1e-4):
+    def __init__(self, input_dim, encoding_dim,epochs, batch_size, learning_rate, weight_decay):
         self.input_dim = input_dim
         self.encoding_dim = encoding_dim
         self.epochs = epochs
@@ -90,7 +90,8 @@ class AutoencoderTransformer(BaseEstimator, TransformerMixin):
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
-            #print(f"Epoch {epoch+1}/{self.epochs}, Loss: {loss.item():.4f}")
+                
+            print(f"Epoch {epoch+1}/{self.epochs}, Loss: {loss.item():.4f}")
         
         return self
     def transform(self, X):
@@ -161,7 +162,7 @@ target_creator = PipelineCreator(problem_type="transformer", apply_to="behaviora
 imputer = IterativeImputer(max_iter=20, random_state=0)
 target_creator.add(imputer)
 target_creator.add("zscore")
-target_creator.add("autoencoder",input_dim=len(behavioral_columns), encoding_dim=3,epochs=100, batch_size=10, learning_rate=0.01, weight_decay=1e-4)
+target_creator.add("autoencoder",input_dim=len(behavioral_columns), encoding_dim=3,epochs=100, batch_size=32, learning_rate=0.001, weight_decay=1e-4)
 # Select a pca component
 target_creator.add("pick_columns", keep=component)
 
@@ -197,7 +198,7 @@ creator.add(
 
 # %%
 # Evaluate the model within the cross validation.
-rkf = RepeatedKFold(n_splits=3,n_repeats=10,random_state=42)
+rkf = RepeatedKFold(n_splits=10,n_repeats=5,random_state=42)
 scores_tuned, model_tuned = run_cross_validation(
     X=X,
     y=y,
@@ -215,4 +216,4 @@ print(f"Scores with best hyperparameter: {scores_tuned['test_r_corr'].mean()}")
 pprint(model_tuned.best_params_)
 
 # %%
-scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/scores_krr_autoencoder_{component}_CV.csv")
+scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/scores_krr_autoencoder_{component}_10fCV_batch32.csv")
