@@ -8,12 +8,11 @@ from argparse import ArgumentParser
 from sklearn.kernel_ridge import KernelRidge
 from pprint import pprint
 from sklearn.model_selection import RepeatedKFold
+from sklearn.model_selection import GroupKFold
+from julearn.model_selection import RepeatedContinuousStratifiedGroupKFold 
 from julearn.utils import configure_logging
-try:
-    configure_logging(level="DEBUG")
-except Exception as e:
-    print(e)
-configure_logging(level="DEBUG")
+
+configure_logging(level="INFO")
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 
@@ -29,6 +28,10 @@ args = parser.parse_args()
 pca_component = args.pca_component
 
 # %%
+# load family group
+groups_df = pd.read_csv("family_id.csv",index_col="Subject")
+groups_df.index = groups_df.index.astype(str)
+
 # Feature generation
 storage = HDF5FeatureStorage("features.hdf5")
 df_features = storage.read_df('BOLD_Schaefer400x17_functional_connectivity')
@@ -47,7 +50,10 @@ behavioral_columns = ['PicSeq_Unadj','CardSort_Unadj','Flanker_Unadj','PMAT24_A_
                      'Loneliness_Unadj','PercHostil_Unadj','PercReject_Unadj','EmotSupp_Unadj','InstruSupp_Unadj','PercStress_Unadj','SelfEff_Unadj','DDisc_AUC_40K','GaitSpeed_Comp']
 df_behavioral = df_behavioral[behavioral_columns]
 df_features.index.name = "Subject"
-df_data = df_features.join(df_behavioral,how="inner")
+df_combined = df_features.join(df_behavioral,how="inner")
+df_data = df_combined.join(groups_df,how='inner')
+df_data = df_data.reset_index()
+
 
 # %%
 X = df_data.columns.tolist()
@@ -68,6 +74,7 @@ X_types = {
 target_creator = PipelineCreator(problem_type="transformer", apply_to="behavioral")
 imputer = IterativeImputer(max_iter=20, random_state=0)
 target_creator.add(imputer)
+target_creator.add("zscore")
 target_creator.add("pca",n_components=3)
 # Select a pca component
 target_creator.add("pick_columns", keep=pca_component)
@@ -82,7 +89,6 @@ creator.add("generate_target", apply_to="behavioral", transformer=target_creator
 creator.add(
     kernel_ridge_model, 
     alpha=[        
-        0,
         0.00001,
         0.0001,
         0.001,
@@ -104,14 +110,18 @@ creator.add(
         5,
         10,
         15,
-        20,],
+        20,
+        50,],
     kernel='linear', 
     apply_to= "features"
     )
 
+# %% Define a repeated group k-fold generator.
+#rkf = RepeatedKFold(n_splits=10,n_repeats=1,random_state=42)
+#cv = RepeatedContinuousStratifiedGroupKFold(n_bins=2, method='quantile', n_splits=3, n_repeats=1, random_state=42)
+gkf = GroupKFold(n_splits=3)
 # %%
 # Evaluate the model within the cross validation.
-rkf = RepeatedKFold(n_splits=10,n_repeats=5,random_state=42)
 scores_tuned, model_tuned = run_cross_validation(
     X=X,
     y=y,
@@ -119,7 +129,8 @@ scores_tuned, model_tuned = run_cross_validation(
     data=df_data,
     model=creator, 
     return_estimator="all",
-    cv=rkf,
+    groups="Family_ID",
+    cv=gkf,
     scoring= ['r2_corr','r_corr'],
     n_jobs = -1,
 )
@@ -129,4 +140,4 @@ print(f"Scores with best hyperparameter: {scores_tuned['test_r_corr'].mean()}")
 pprint(model_tuned.best_params_)
 
 # %%
-scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/scores_krr_{pca_component}.csv")
+scores_tuned.to_csv(f"/home/haotsung/HCP_behavioral_prediction/results/pca_results/scores_krr_{pca_component}_0315.csv")
